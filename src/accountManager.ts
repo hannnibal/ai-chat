@@ -73,6 +73,7 @@ interface AccountRuntime {
   phoneToJid: Map<string, string>;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   shuttingDown: boolean;
+  connectionGeneration: number;
 }
 
 // ── 持久化路径 ────────────────────────────────────────────────
@@ -120,6 +121,24 @@ function hasSavedSession(accountId: string): boolean {
   return fs.existsSync(sessionDir) && fs.readdirSync(sessionDir).length > 0;
 }
 
+function clearReconnectTimer(rt: AccountRuntime): void {
+  if (!rt.reconnectTimer) return;
+  clearTimeout(rt.reconnectTimer);
+  rt.reconnectTimer = null;
+}
+
+function scheduleReconnect(rt: AccountRuntime, delayMs: number): void {
+  clearReconnectTimer(rt);
+  const expectedGeneration = rt.connectionGeneration;
+  rt.reconnectTimer = setTimeout(() => {
+    rt.reconnectTimer = null;
+    if (rt.connectionGeneration !== expectedGeneration) return;
+    startConnection(rt).catch((err) => {
+      logger.error({ err, accountId: rt.config.id }, 'Reconnect failed');
+    });
+  }, delayMs);
+}
+
 // ── 公开 API ──────────────────────────────────────────────────
 
 export function getAllAccounts(): AccountInfo[] {
@@ -152,7 +171,7 @@ export function addAccount(label: string, chatwootInboxId?: number): AccountInfo
   const rt: AccountRuntime = {
     config: cfg,
     socket: null,
-    status: 'disconnected',
+    status: 'logged_out',
     phone: null,
     qrDataUrl: null,
     qrRaw: null,
@@ -162,6 +181,7 @@ export function addAccount(label: string, chatwootInboxId?: number): AccountInfo
     phoneToJid: new Map(),
     reconnectTimer: null,
     shuttingDown: false,
+    connectionGeneration: 0,
   };
   accounts.set(id, rt);
   saveAccountConfigs();
@@ -237,10 +257,9 @@ export async function reloginAccountById(id: string): Promise<void> {
   const rt = accounts.get(id);
   if (!rt) throw new Error(`Account ${id} not found`);
 
-  if (rt.reconnectTimer) {
-    clearTimeout(rt.reconnectTimer);
-    rt.reconnectTimer = null;
-  }
+  clearReconnectTimer(rt);
+  rt.connectionGeneration += 1;
+  rt.shuttingDown = true;
   if (rt.socket) {
     try { rt.socket.end(undefined); } catch { /* ignore */ }
     rt.socket = null;
@@ -273,6 +292,8 @@ export async function logoutAccountById(id: string): Promise<void> {
   const rt = accounts.get(id);
   if (!rt) throw new Error(`Account ${id} not found`);
 
+  clearReconnectTimer(rt);
+  rt.connectionGeneration += 1;
   rt.shuttingDown = true;
   if (rt.socket) {
     try { await rt.socket.logout(); } catch { /* ok */ }
@@ -325,16 +346,14 @@ export function getFirstConnectedSocket(): ReturnType<typeof makeWASocket> | nul
 // ── 内部实现 ──────────────────────────────────────────────────
 
 async function disconnectAccount(rt: AccountRuntime): Promise<void> {
-  if (rt.reconnectTimer) {
-    clearTimeout(rt.reconnectTimer);
-    rt.reconnectTimer = null;
-  }
+  clearReconnectTimer(rt);
+  rt.connectionGeneration += 1;
   rt.shuttingDown = true;
   if (rt.socket) {
     rt.socket.end(undefined);
     rt.socket = null;
   }
-  rt.status = 'disconnected';
+  rt.status = hasSavedSession(rt.config.id) ? 'disconnected' : 'logged_out';
   rt.qrDataUrl = null;
   rt.qrRaw = null;
   rt.updatedAt = new Date();
@@ -344,11 +363,15 @@ async function disconnectAccount(rt: AccountRuntime): Promise<void> {
 async function startConnection(rt: AccountRuntime): Promise<void> {
   const accountId = rt.config.id;
   const sessionDir = getSessionDir(accountId);
+  clearReconnectTimer(rt);
+  const generation = ++rt.connectionGeneration;
   if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+  if (generation !== rt.connectionGeneration) return;
 
   const { version } = await fetchLatestBaileysVersion();
+  if (generation !== rt.connectionGeneration) return;
   logger.info({ accountId, version }, 'Starting WhatsApp connection');
 
   const sock = makeWASocket({
@@ -358,7 +381,13 @@ async function startConnection(rt: AccountRuntime): Promise<void> {
     logger: baileysLogger.child({ accountId }) as never,
     generateHighQualityLinkPreview: false,
     syncFullHistory: false,
+    shouldIgnoreJid: (jid: string) => !isDirectChatJid(jid),
   });
+
+  if (generation !== rt.connectionGeneration) {
+    try { sock.end(undefined); } catch { /* ignore */ }
+    return;
+  }
 
   rt.socket = sock;
   rt.shuttingDown = false;
@@ -368,11 +397,14 @@ async function startConnection(rt: AccountRuntime): Promise<void> {
 
   // ── connection.update ─────────────────────────────────────
   sock.ev.on('connection.update', async (update) => {
+    if (generation !== rt.connectionGeneration) return;
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
       rt.qrRaw = qr;
-      rt.qrDataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
+      const qrDataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
+      if (generation !== rt.connectionGeneration) return;
+      rt.qrDataUrl = qrDataUrl;
       rt.status = 'qr_required';
       rt.updatedAt = new Date();
       broadcast();
@@ -396,7 +428,7 @@ async function startConnection(rt: AccountRuntime): Promise<void> {
       rt.socket = null;
 
       if (rt.shuttingDown) {
-        rt.status = 'disconnected';
+        rt.status = hasSavedSession(accountId) ? 'disconnected' : 'logged_out';
         rt.updatedAt = new Date();
         broadcast();
         logger.info({ accountId }, 'Connection closed during intentional shutdown');
@@ -422,7 +454,7 @@ async function startConnection(rt: AccountRuntime): Promise<void> {
         rt.status = 'disconnected';
         rt.updatedAt = new Date();
         broadcast();
-        rt.reconnectTimer = setTimeout(() => startConnection(rt), 3000);
+        scheduleReconnect(rt, 3000);
       } else if (
         statusCode === DisconnectReason.connectionClosed ||
         statusCode === DisconnectReason.connectionLost ||
@@ -436,14 +468,14 @@ async function startConnection(rt: AccountRuntime): Promise<void> {
         broadcast();
         const delay = statusCode === DisconnectReason.restartRequired ? 1000 : 5000;
         logger.info({ accountId, statusCode }, `Recoverable disconnect, reconnecting in ${delay}ms...`);
-        rt.reconnectTimer = setTimeout(() => startConnection(rt), delay);
+        scheduleReconnect(rt, delay);
       } else {
         // 未知断线：保留 session，稍慢重连
         rt.status = 'disconnected';
         rt.updatedAt = new Date();
         broadcast();
         logger.warn({ accountId, statusCode }, 'Unexpected disconnect, reconnecting in 10s...');
-        rt.reconnectTimer = setTimeout(() => startConnection(rt), 10_000);
+        scheduleReconnect(rt, 10_000);
       }
     }
 
@@ -455,7 +487,14 @@ async function startConnection(rt: AccountRuntime): Promise<void> {
   });
 
   // ── creds.update ──────────────────────────────────────────
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', () => {
+    if (generation !== rt.connectionGeneration) return;
+    fs.mkdirSync(sessionDir, { recursive: true });
+    void saveCreds().catch((err) => {
+      if (generation !== rt.connectionGeneration) return;
+      logger.warn({ err, accountId, sessionDir }, 'Failed to persist WhatsApp session credentials');
+    });
+  });
 
   // ── messages.upsert ───────────────────────────────────────
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
@@ -567,7 +606,7 @@ export function startHealthChecks(intervalMs = 60_000): void {
           rt.updatedAt = new Date();
           broadcast();
           // 尝试重连
-          rt.reconnectTimer = setTimeout(() => startConnection(rt), 5000);
+          scheduleReconnect(rt, 5000);
         } else {
           rt.lastHealthCheck = new Date();
           rt.updatedAt = new Date();
@@ -602,7 +641,7 @@ export async function initAccountManager(): Promise<void> {
     const rt: AccountRuntime = {
       config: cfg,
       socket: null,
-      status: 'disconnected',
+      status: hasSavedSession(cfg.id) ? 'disconnected' : 'logged_out',
       phone: null,
       qrDataUrl: null,
       qrRaw: null,
@@ -612,6 +651,7 @@ export async function initAccountManager(): Promise<void> {
       phoneToJid: new Map(),
       reconnectTimer: null,
       shuttingDown: false,
+      connectionGeneration: 0,
     };
     accounts.set(cfg.id, rt);
 

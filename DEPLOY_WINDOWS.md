@@ -22,6 +22,363 @@
 
 ---
 
+## 最简单的方式：直接使用 `deploy.ps1`
+
+如果你不熟悉 Windows，建议优先用一键脚本：
+
+- 脚本路径：[scripts/windows/deploy.ps1](/Users/hannibal/chatwoot/baileys-adapter/scripts/windows/deploy.ps1)
+- 作用：自动安装依赖、拉代码、生成 `.env`、安装项目依赖、构建、交给 PM2 托管
+
+脚本会自动做这些事：
+
+- 检查并安装 `Git`
+- 检查并安装 `Node.js`
+- 安装 `PM2`
+- 安装 `pm2-windows-startup`
+- 克隆或更新你的 GitHub 仓库
+- 生成 `C:\baileys-adapter\.env`
+- 执行 `npm install`
+- 执行 `npm run build`
+- 启动 `baileys-adapter`
+
+建议：
+
+- 第一次运行时，用“管理员 PowerShell”
+- 仓库如果是公开的，不需要输入 GitHub 密码
+- 运行脚本前，先准备好这 3 个值：
+  - `CHATWOOT_BASE_URL`
+  - `CHATWOOT_API_TOKEN`
+  - `CHATWOOT_ACCOUNT_ID`
+
+---
+
+## 一键脚本详细使用说明
+
+下面这部分按“你远程进入一台 Windows 电脑，然后一步一步操作”来写。
+
+### 入口 1：先下载整个项目，再运行脚本
+
+这是最推荐的方式，最直观。
+
+#### 1. 打开浏览器
+
+在 Windows 电脑桌面上：
+
+- 点击左下角 `开始`
+- 找到 `Microsoft Edge` 或 `Google Chrome`
+- 打开浏览器
+
+#### 2. 打开 GitHub 仓库
+
+在浏览器地址栏输入：
+
+```text
+https://github.com/hannnibal/ai-chat
+```
+
+按回车。
+
+#### 3. 下载 ZIP 压缩包
+
+在 GitHub 页面右上区域：
+
+- 点击绿色按钮 `Code`
+- 在弹出的菜单里点击 `Download ZIP`
+
+浏览器会开始下载一个压缩包，通常会保存在：
+
+```text
+C:\Users\你的用户名\Downloads
+```
+
+#### 4. 解压 ZIP 压缩包
+
+下载完成后：
+
+- 打开 `文件资源管理器`
+- 点击左侧 `下载`
+- 找到刚下载的 ZIP 文件，例如 `ai-chat-main.zip`
+- 右键这个文件
+- 点击 `全部提取...`
+- 目标位置建议选择：
+
+```text
+C:\Users\你的用户名\Desktop\ai-chat-main
+```
+
+- 点击 `提取`
+
+#### 5. 找到脚本文件
+
+解压后进入这个目录：
+
+```text
+ai-chat-main\scripts\windows\
+```
+
+你会看到：
+
+```text
+deploy.ps1
+```
+
+#### 6. 以管理员身份打开 PowerShell
+
+在 Windows 左下角：
+
+- 点击 `开始`
+- 输入 `PowerShell`
+- 在搜索结果里找到 `Windows PowerShell`
+- 右键它
+- 点击 `以管理员身份运行`
+
+如果弹出系统确认框：
+
+- 点击 `是`
+
+#### 7. 切换到脚本所在目录
+
+假设你刚才把 ZIP 解压到了桌面，那么在 PowerShell 输入：
+
+```powershell
+cd C:\Users\你的用户名\Desktop\ai-chat-main\scripts\windows
+```
+
+如果你不确定你的用户名是什么，可以先打开 `文件资源管理器` 看地址栏路径，再照着输入。
+
+#### 8. 运行脚本
+
+在 PowerShell 输入：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+```
+
+然后按回车。
+
+脚本运行时会自动：
+
+- 安装 Git
+- 安装 Node.js
+- 安装 PM2
+- 从 GitHub 拉代码到 `C:\baileys-adapter`
+- 询问并写入 Chatwoot 配置
+- 构建并启动服务
+
+#### 9. 按提示输入 Chatwoot 配置
+
+脚本会停下来，依次问你：
+
+```text
+CHATWOOT_BASE_URL
+CHATWOOT_API_TOKEN
+CHATWOOT_ACCOUNT_ID
+```
+
+你就把真实值粘贴进去，每输完一个按一次回车。
+
+例如：
+
+```text
+CHATWOOT_BASE_URL: https://app.chatwoot.com
+CHATWOOT_API_TOKEN: xxxxxxxxx
+CHATWOOT_ACCOUNT_ID: 158759
+```
+
+#### 10. 等脚本执行完
+
+正常结束后，会看到类似信息：
+
+```text
+Health URL:  http://localhost:3001/health
+Admin URL:   http://localhost:3001/admin
+```
+
+这说明部署成功了。
+
+---
+
+### 入口 2：如果你已经把项目克隆到 `C:\baileys-adapter`
+
+如果代码已经在 Windows 电脑上了，可以直接运行仓库里的脚本。
+
+#### 1. 打开项目目录
+
+在 `文件资源管理器` 进入：
+
+```text
+C:\baileys-adapter
+```
+
+#### 2. 找到脚本目录
+
+继续进入：
+
+```text
+scripts\windows
+```
+
+#### 3. 在当前文件夹打开 PowerShell
+
+有几种最简单的方法：
+
+- 方法 A：
+  - 在文件夹空白处按住 `Shift`
+  - 右键
+  - 点击 `在此处打开 PowerShell 窗口`
+  - 如果你的系统显示的是 `在终端中打开`，点它也可以
+
+- 方法 B：
+  - 点击文件资源管理器顶部地址栏
+  - 输入：
+
+```text
+powershell
+```
+
+  - 按回车
+
+#### 4. 运行脚本
+
+输入：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1
+```
+
+如果你希望脚本运行时不要再询问，而是直接带参数执行，可以这样：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1 `
+  -ChatwootBaseUrl "https://app.chatwoot.com" `
+  -ChatwootApiToken "你的token" `
+  -ChatwootAccountId "158759" `
+  -ForceEnvUpdate
+```
+
+说明：
+
+- 反引号 `` ` `` 是 PowerShell 的换行符
+- 如果你怕输错，也可以全部写成一行
+
+一行版本如下：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -ChatwootBaseUrl "https://app.chatwoot.com" -ChatwootApiToken "你的token" -ChatwootAccountId "158759" -ForceEnvUpdate
+```
+
+---
+
+## 脚本运行时你会看到什么
+
+脚本会按顺序打印：
+
+- `Starting Windows deployment`
+- `Installing Git`
+- `Installing Node.js`
+- `Installing PM2`
+- `Preparing directories`
+- `Cloning repository`
+- `Writing .env`
+- `Installing project dependencies`
+- `Configuring PM2`
+- `Deployment finished`
+
+如果某一步卡住，通常是在：
+
+- `winget` 正在安装软件
+- `npm install` 正在下载依赖
+- 网络比较慢
+
+第一次部署时，等待几分钟是正常的。
+
+---
+
+## 部署完成后如何验证
+
+### 1. 打开健康检查地址
+
+在浏览器打开：
+
+```text
+http://localhost:3001/health
+```
+
+如果看到 JSON，说明服务已经启动。
+
+### 2. 打开管理后台
+
+在浏览器打开：
+
+```text
+http://localhost:3001/admin
+```
+
+### 3. 第一次使用后台的顺序
+
+在 `/admin` 页面里：
+
+1. 点击 `Add Account`
+2. 输入账号标签，例如 `xiaosong`
+3. 填写这个账号对应的 `Chatwoot Inbox ID`
+4. 保存
+5. 点击 `Scan QR`
+6. 用该 WhatsApp 手机扫码
+
+---
+
+## 如果脚本提示报错，最常见的处理方式
+
+### 1. 提示 `winget is not available`
+
+说明这台 Windows 没装 `App Installer`。
+
+处理方法：
+
+- 打开 `Microsoft Store`
+- 搜索 `App Installer`
+- 安装
+- 重新打开 PowerShell
+- 再运行脚本
+
+### 2. 提示 `node is still not in PATH`
+
+说明 Node.js 刚装好，但当前 PowerShell 还没刷新环境变量。
+
+处理方法：
+
+- 关闭当前 PowerShell
+- 重新用管理员方式打开 PowerShell
+- 再运行一次脚本
+
+### 3. 提示 `.env already exists`
+
+说明之前已经部署过。
+
+如果你想覆盖 `.env`，使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -ForceEnvUpdate
+```
+
+### 4. 提示仓库目录非空
+
+说明：
+
+- `C:\baileys-adapter` 已存在
+- 但不是 Git 仓库
+
+处理方法二选一：
+
+- 手动清空 `C:\baileys-adapter`
+- 或运行脚本时改目录：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1 -InstallDir "C:\baileys-adapter-2"
+```
+
+---
+
 ## 第 1 步：先做机器基础设置
 
 ### 1.1 关闭睡眠和自动休眠
@@ -169,6 +526,23 @@ C:\baileys-adapter
 ## 第 5 步：同步代码到 Windows 电脑
 
 你可以选两种方式。
+
+如果你想直接一键部署，也可以在拉下代码后执行：
+
+```powershell
+cd C:\baileys-adapter
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\deploy.ps1
+```
+
+脚本会自动处理：
+
+- 安装 Git / Node.js（缺失时）
+- 安装 PM2 / pm2-windows-startup
+- 同步 GitHub 代码
+- 生成 `.env`
+- `npm install`
+- `npm run build`
+- 启动 PM2
 
 ### 方式 A：Git 拉代码
 

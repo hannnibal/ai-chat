@@ -491,20 +491,20 @@ function renderCard(a) {
   // Action buttons
   let actions = '';
   if (s === 'disconnected') {
-    actions += '<button class="btn btn-blue" onclick="doConnect(\\'' + a.id + '\\')">' + ICONS.plug + ' Reconnect</button>';
-    actions += '<button class="btn btn-ghost" onclick="doRelogin(\\'' + a.id + '\\')">' + ICONS.logOut + ' Re-login</button>';
+    actions += '<button class="btn btn-blue" onclick="doConnect(&quot;' + a.id + '&quot;)">' + ICONS.plug + ' Reconnect</button>';
+    actions += '<button class="btn btn-ghost" onclick="doRelogin(&quot;' + a.id + '&quot;)">' + ICONS.logOut + ' Re-login</button>';
   }
   if (s === 'logged_out') {
-    actions += '<button class="btn btn-blue" onclick="doRelogin(\\'' + a.id + '\\')">' + ICONS.plug + ' Scan QR</button>';
+    actions += '<button class="btn btn-blue" onclick="doRelogin(&quot;' + a.id + '&quot;)">' + ICONS.plug + ' Scan QR</button>';
   }
   if (s === 'qr_required') {
-    actions += '<button class="btn btn-ghost" onclick="doDisconnect(\\'' + a.id + '\\')">' + ICONS.x + ' Cancel</button>';
+    actions += '<button class="btn btn-ghost" onclick="doDisconnect(&quot;' + a.id + '&quot;)">' + ICONS.x + ' Cancel</button>';
   }
   if (s === 'connected') {
-    actions += '<button class="btn btn-ghost" onclick="doDisconnect(\\'' + a.id + '\\')">' + ICONS.unplug + ' Disconnect</button>';
-    actions += '<button class="btn btn-danger" onclick="doLogout(\\'' + a.id + '\\')">' + ICONS.logOut + ' Logout</button>';
+    actions += '<button class="btn btn-ghost" onclick="doDisconnect(&quot;' + a.id + '&quot;)">' + ICONS.unplug + ' Disconnect</button>';
+    actions += '<button class="btn btn-danger" onclick="doLogout(&quot;' + a.id + '&quot;)">' + ICONS.logOut + ' Logout</button>';
   }
-  actions += '<button class="btn btn-danger" onclick="doDelete(\\'' + a.id + '\\')" style="margin-left:auto">' + ICONS.trash + '</button>';
+  actions += '<button class="btn btn-danger" onclick="doDelete(&quot;' + a.id + '&quot;)" style="margin-left:auto">' + ICONS.trash + '</button>';
 
   return '<div class="card">' +
     '<div class="card-body">' +
@@ -519,11 +519,11 @@ function renderCard(a) {
         '<input class="inbox-input" id="inbox-' + a.id + '" value="' + (a.chatwootInboxId || '') + '" placeholder="Not set" ' + (editingInbox ? '' : 'readonly') + ' />' +
         (
           editingInbox
-            ? '<button class="btn btn-ghost btn-xs" onclick="saveInboxId(\\'' + a.id + '\\')">Save</button>' +
-              '<button class="btn btn-ghost btn-xs" onclick="cancelInboxEdit(\\'' + a.id + '\\', \'' + (a.chatwootInboxId || '') + '\')">Cancel</button>'
-            : '<button class="btn btn-ghost btn-xs" onclick="enableInboxEdit(\\'' + a.id + '\\')">Edit</button>'
+            ? '<button class="btn btn-ghost btn-xs" onclick="saveInboxId(&quot;' + a.id + '&quot;)">Save</button>' +
+              '<button class="btn btn-ghost btn-xs" onclick="cancelInboxEdit(&quot;' + a.id + '&quot;)">Cancel</button>'
+            : '<button class="btn btn-ghost btn-xs" onclick="enableInboxEdit(&quot;' + a.id + '&quot;)">Edit</button>'
         ) +
-        (!a.chatwootInboxId ? '<span class="inbox-warn">Messages won\\'t be recorded</span>' : '') +
+        (!a.chatwootInboxId ? '<span class="inbox-warn">Messages will not be recorded</span>' : '') +
       '</div>' +
       '<div class="card-actions">' + actions + '</div>' +
       '<div class="card-meta">' +
@@ -538,11 +538,22 @@ function renderCard(a) {
 function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 // ── SSE ──────────────────────────────────
+async function loadAccounts() {
+  try {
+    var res = await fetch('/api/v1/whatsapp/accounts');
+    var data = await res.json();
+    render(data.accounts || []);
+  } catch (err) {
+    console.error('Failed to load accounts', err);
+  }
+}
+
 function connectSSE() {
   var es = new EventSource('/api/v1/whatsapp/events');
   es.onmessage = function(e) { try { render(JSON.parse(e.data).accounts); } catch(err) { console.error(err); } };
   es.onerror = function() { es.close(); setTimeout(connectSSE, 3000); };
 }
+loadAccounts();
 connectSSE();
 
 // ── API helpers ──────────────────────────
@@ -550,7 +561,11 @@ async function api(method, path, body) {
   var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   var res = await fetch(path, opts);
-  return res.json();
+  var data = await res.json().catch(function() { return {}; });
+  if (!res.ok) {
+    throw new Error(data.error || data.message || ('Request failed: ' + res.status));
+  }
+  return data;
 }
 
 async function addAccount() {
@@ -560,23 +575,34 @@ async function addAccount() {
   if (!label) { input.focus(); return; }
   input.disabled = true;
   inboxInput.disabled = true;
-  var body = { label: label };
-  var inboxVal = inboxInput.value.trim();
-  if (inboxVal) body.chatwoot_inbox_id = inboxVal;
-  await api('POST', '/api/v1/whatsapp/accounts', body);
-  input.value = '';
-  inboxInput.value = '';
-  input.disabled = false;
-  inboxInput.disabled = false;
-  input.focus();
+  try {
+    var body = { label: label };
+    var inboxVal = inboxInput.value.trim();
+    if (inboxVal) body.chatwoot_inbox_id = inboxVal;
+    await api('POST', '/api/v1/whatsapp/accounts', body);
+    input.value = '';
+    inboxInput.value = '';
+    await loadAccounts();
+    input.focus();
+  } catch (err) {
+    alert(err.message || 'Failed to add account');
+  } finally {
+    input.disabled = false;
+    inboxInput.disabled = false;
+  }
 }
 
 async function saveInboxId(id) {
   var input = document.getElementById('inbox-' + id);
   var val = input.value.trim();
   if (!confirm('Change Chatwoot Inbox ID for this account?')) return;
-  await api('PATCH', '/api/v1/whatsapp/accounts/' + id, { chatwoot_inbox_id: val || null });
-  editingInboxIds.delete(id);
+  try {
+    await api('PATCH', '/api/v1/whatsapp/accounts/' + id, { chatwoot_inbox_id: val || null });
+    editingInboxIds.delete(id);
+    await loadAccounts();
+  } catch (err) {
+    alert(err.message || 'Failed to update inbox ID');
+  }
 }
 
 function enableInboxEdit(id) {
@@ -588,29 +614,49 @@ function enableInboxEdit(id) {
   input.select();
 }
 
-function cancelInboxEdit(id, originalValue) {
+function cancelInboxEdit(id) {
   editingInboxIds.delete(id);
-  var input = document.getElementById('inbox-' + id);
-  if (input) {
-    input.value = originalValue;
-    input.readOnly = true;
-  }
   render(window.__lastAccounts || []);
 }
 
-async function doConnect(id) { await api('POST', '/api/v1/whatsapp/accounts/' + id + '/connect'); }
+async function doConnect(id) {
+  try {
+    await api('POST', '/api/v1/whatsapp/accounts/' + id + '/connect');
+  } catch (err) {
+    alert(err.message || 'Failed to reconnect account');
+  }
+}
 async function doRelogin(id) {
   if (!confirm('This will clear the saved session and generate a new QR code. Continue?')) return;
-  await api('POST', '/api/v1/whatsapp/accounts/' + id + '/relogin');
+  try {
+    await api('POST', '/api/v1/whatsapp/accounts/' + id + '/relogin');
+  } catch (err) {
+    alert(err.message || 'Failed to re-login account');
+  }
 }
-async function doDisconnect(id) { await api('POST', '/api/v1/whatsapp/accounts/' + id + '/disconnect'); }
+async function doDisconnect(id) {
+  try {
+    await api('POST', '/api/v1/whatsapp/accounts/' + id + '/disconnect');
+  } catch (err) {
+    alert(err.message || 'Failed to disconnect account');
+  }
+}
 async function doLogout(id) {
   if (!confirm('This will clear the session. You will need to scan a new QR code. Continue?')) return;
-  await api('POST', '/api/v1/whatsapp/accounts/' + id + '/logout');
+  try {
+    await api('POST', '/api/v1/whatsapp/accounts/' + id + '/logout');
+  } catch (err) {
+    alert(err.message || 'Failed to logout account');
+  }
 }
 async function doDelete(id) {
   if (!confirm('Permanently delete this account? This cannot be undone.')) return;
-  await api('DELETE', '/api/v1/whatsapp/accounts/' + id);
+  try {
+    await api('DELETE', '/api/v1/whatsapp/accounts/' + id);
+    await loadAccounts();
+  } catch (err) {
+    alert(err.message || 'Failed to delete account');
+  }
 }
 </script>
 </body>

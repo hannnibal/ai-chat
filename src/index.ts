@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import type { Server } from 'http';
 import { config } from './config';
 import { logger } from './logger';
 import { initAccountManager, getAllAccounts, disconnectAccountById, stopHealthChecks } from './accountManager';
@@ -11,10 +12,20 @@ app.use(express.json());
 app.use(adminRouter); // admin routes first (includes /health override)
 app.use(router);
 
-async function start(): Promise<void> {
-  app.listen(config.port, () => {
-    logger.info({ port: config.port }, 'Baileys Adapter HTTP server started');
+function listenAsync(): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(config.port, () => {
+      logger.info({ port: config.port }, 'Baileys Adapter HTTP server started');
+      server.off('error', reject);
+      resolve(server);
+    });
+
+    server.once('error', reject);
   });
+}
+
+async function start(): Promise<void> {
+  await listenAsync();
 
   // 初始化多账号管理器（加载已保存账号并自动连接）
   await initAccountManager();
